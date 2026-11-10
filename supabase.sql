@@ -178,37 +178,26 @@ begin
  on conflict(toast_id) do update set taste=excluded.taste,originality=excluded.originality,presentation=excluded.presentation,explanation=excluded.explanation,judge_id=auth.uid(),updated_at=now();
 end; $$;
 
-create or replace function public.set_toast_room_status(p_room_id uuid,p_status text)
+create or replace function public.set_toast_room_status(p_status text)
 returns void language plpgsql security definer set search_path=public
 as $$
+declare v_room_id uuid;
 begin
  if p_status not in ('submissions','voting','finished') then raise exception 'Estado no válido.'; end if;
- update public.toast_rooms set status=p_status
- where id=p_room_id and director_id=auth.uid();
- if not found then raise exception 'No eres director de esta sala.'; end if;
+ update public.toast_rooms set status=p_status where director_id=auth.uid()
+ returning id into v_room_id;
+ if v_room_id is null then raise exception 'No eres director de una sala.'; end if;
 end; $$;
 
-create or replace function public.set_toast_room_challenge(p_room_id uuid,p_challenge text)
+create or replace function public.set_toast_room_challenge(p_challenge text)
 returns void language plpgsql security definer set search_path=public
 as $$
+declare v_room_id uuid;
 begin
  update public.toast_rooms set challenge=nullif(trim(p_challenge),'')
- where id=p_room_id and director_id=auth.uid();
- if not found then raise exception 'No eres director de esta sala.'; end if;
+ where director_id=auth.uid() returning id into v_room_id;
+ if v_room_id is null then raise exception 'No eres director de una sala.'; end if;
 end; $$;
-
-revoke all on function public.is_toast_room_member(uuid) from public, anon;
-revoke all on function public.is_toast_room_director(uuid) from public, anon;
-revoke all on function public.create_toast_room(text,text) from public, anon;
-revoke all on function public.join_toast_room(text,text) from public, anon;
-revoke all on function public.submit_toast_entry(uuid,text,text,text[],text,text) from public, anon;
-revoke all on function public.cast_toast_vote(uuid,int) from public, anon;
-revoke all on function public.score_toast_entry(uuid,int,int,int,int) from public, anon;
-revoke all on function public.set_toast_room_status(uuid,text) from public, anon;
-revoke all on function public.set_toast_room_challenge(uuid,text) from public, anon;
-
-grant execute on function public.is_toast_room_member(uuid) to authenticated;
-grant execute on function public.is_toast_room_director(uuid) to authenticated;
 
 grant usage on schema public to authenticated;
 grant select on public.toast_rooms,public.toast_room_members,public.toast_entries,public.toast_votes,public.toast_judge_scores to authenticated;
@@ -217,9 +206,251 @@ grant execute on function public.join_toast_room(text,text) to authenticated;
 grant execute on function public.submit_toast_entry(uuid,text,text,text[],text,text) to authenticated;
 grant execute on function public.cast_toast_vote(uuid,int) to authenticated;
 grant execute on function public.score_toast_entry(uuid,int,int,int,int) to authenticated;
-grant execute on function public.set_toast_room_status(uuid,text) to authenticated;
-grant execute on function public.set_toast_room_challenge(uuid,text) to authenticated;
+grant execute on function public.set_toast_room_status(text) to authenticated;
+grant execute on function public.set_toast_room_challenge(text) to authenticated;
 
 -- Para actualizaciones en directo:
 -- En Supabase > Database > Replication, activa Realtime para:
 -- toast_rooms, toast_room_members, toast_entries, toast_votes, toast_judge_scores.
+
+
+-- ===== ACTUALIZACIÓN DE REGLAS V2 (también disponible en supabase_update.sql) =====
+-- ACTUALIZACIÓN: presentación libre, reto aleatorio y votación simple.
+-- Ejecutar UNA VEZ en Supabase > SQL Editor, sobre el proyecto ya existente.
+
+-- 1) Asignar un reto aleatorio a salas antiguas que aún no tengan ninguno.
+DO $$
+DECLARE
+  v_challenges text[] := ARRAY[
+    '🌋 En algún punto de la preparación debes mencionar un volcán y relacionarlo con tu tostada.',
+    '🐉 En la preparación debe aparecer un dragón que tenga una opinión muy firme sobre uno de los ingredientes.',
+    '📺 Describe al menos un paso como si estuvieras vendiendo la tostada en un anuncio de teletienda.',
+    '👽 Uno de los ingredientes debe ser presentado como un misterioso descubrimiento extraterrestre.',
+    '💥 Incluye un efecto de sonido escrito (¡PLOF!, ¡CHOF!, ¡BOING!) dentro de la preparación.',
+    '⚠️ Añade una advertencia absurda sobre los posibles efectos secundarios de comer tu tostada.',
+    '🏴‍☠️ En algún momento, explica un paso de la receta como lo haría un pirata.',
+    '🗡️ Presenta uno de los ingredientes como si fuera un arma legendaria con nombre propio.',
+    '👑 La preparación debe incluir una frase de un rey o una reina que pruebe tu tostada.',
+    '🎵 Incluye una pequeña rima de dos versos dentro de la descripción de la preparación.'
+  ];
+BEGIN
+  UPDATE public.toast_rooms
+  SET challenge = v_challenges[1 + floor(random() * cardinality(v_challenges))::int];
+END $$;
+
+-- 2) Las salas nuevas reciben su reto al crearse. El director no interviene.
+CREATE OR REPLACE FUNCTION public.create_toast_room(p_room_name text, p_display_name text)
+RETURNS TABLE(room_id uuid, invite_token text)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path TO 'public', 'extensions'
+AS $function$
+DECLARE
+  v_room_id uuid;
+  v_token text;
+  v_challenges text[] := ARRAY[
+    '🌋 En algún punto de la preparación debes mencionar un volcán y relacionarlo con tu tostada.',
+    '🐉 En la preparación debe aparecer un dragón que tenga una opinión muy firme sobre uno de los ingredientes.',
+    '📺 Describe al menos un paso como si estuvieras vendiendo la tostada en un anuncio de teletienda.',
+    '👽 Uno de los ingredientes debe ser presentado como un misterioso descubrimiento extraterrestre.',
+    '💥 Incluye un efecto de sonido escrito (¡PLOF!, ¡CHOF!, ¡BOING!) dentro de la preparación.',
+    '⚠️ Añade una advertencia absurda sobre los posibles efectos secundarios de comer tu tostada.',
+    '🏴‍☠️ En algún momento, explica un paso de la receta como lo haría un pirata.',
+    '🗡️ Presenta uno de los ingredientes como si fuera un arma legendaria con nombre propio.',
+    '👑 La preparación debe incluir una frase de un rey o una reina que pruebe tu tostada.',
+    '🎵 Incluye una pequeña rima de dos versos dentro de la descripción de la preparación.'
+  ];
+  v_challenge text;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Debes iniciar sesión.'; END IF;
+  IF length(trim(p_display_name)) NOT BETWEEN 1 AND 35 THEN RAISE EXCEPTION 'Nombre no válido.'; END IF;
+
+  v_token := encode(extensions.gen_random_bytes(24), 'hex');
+  v_challenge := v_challenges[1 + floor(random() * cardinality(v_challenges))::int];
+
+  INSERT INTO public.toast_rooms(name, invite_hash, director_id, challenge)
+  VALUES (
+    coalesce(nullif(trim(p_room_name), ''), 'El Gran Maestro Tostadero'),
+    extensions.digest(v_token, 'sha256'),
+    auth.uid(),
+    v_challenge
+  )
+  RETURNING id INTO v_room_id;
+
+  INSERT INTO public.toast_room_members(room_id, user_id, display_name, role)
+  VALUES (v_room_id, auth.uid(), trim(p_display_name), 'director');
+
+  RETURN QUERY SELECT v_room_id, v_token;
+END;
+$function$;
+
+-- La función de entrada usa explícitamente extensions.digest para evitar errores de search_path.
+CREATE OR REPLACE FUNCTION public.join_toast_room(p_invite_token text, p_display_name text)
+RETURNS TABLE(room_id uuid)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path TO 'public'
+AS $function$
+#variable_conflict use_column
+DECLARE
+  v_room_id uuid;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Debes iniciar sesión.'; END IF;
+  IF length(trim(p_display_name)) NOT BETWEEN 1 AND 35 THEN RAISE EXCEPTION 'Nombre no válido.'; END IF;
+
+  SELECT r.id INTO v_room_id
+  FROM public.toast_rooms AS r
+  WHERE r.invite_hash = extensions.digest(p_invite_token, 'sha256')
+    AND r.status <> 'finished';
+
+  IF v_room_id IS NULL THEN
+    RAISE EXCEPTION 'El enlace no es válido o el concurso ha terminado.';
+  END IF;
+
+  INSERT INTO public.toast_room_members(room_id, user_id, display_name, role)
+  VALUES (v_room_id, auth.uid(), trim(p_display_name), 'player')
+  ON CONFLICT (room_id, user_id)
+  DO UPDATE SET display_name = EXCLUDED.display_name;
+
+  RETURN QUERY SELECT v_room_id;
+END;
+$function$;
+
+-- 3) Presentar tostadas en cualquier momento, sin fases ni desbloqueos.
+CREATE OR REPLACE FUNCTION public.submit_toast_entry(
+  p_room_id uuid,
+  p_title text,
+  p_base text,
+  p_ingredients text[],
+  p_recipe text DEFAULT '',
+  p_pitch text DEFAULT ''
+)
+RETURNS uuid
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path TO 'public'
+AS $function$
+DECLARE
+  v_member_id uuid;
+  v_id uuid;
+BEGIN
+  IF NOT public.is_toast_room_member(p_room_id) THEN
+    RAISE EXCEPTION 'No perteneces a esta sala.';
+  END IF;
+  IF length(trim(p_title)) NOT BETWEEN 1 AND 50 THEN
+    RAISE EXCEPTION 'El nombre debe tener entre 1 y 50 caracteres.';
+  END IF;
+  IF cardinality(p_ingredients) NOT BETWEEN 1 AND 5 THEN
+    RAISE EXCEPTION 'Elige entre 1 y 5 ingredientes.';
+  END IF;
+
+  SELECT id INTO v_member_id
+  FROM public.toast_room_members
+  WHERE room_id = p_room_id AND user_id = auth.uid();
+
+  INSERT INTO public.toast_entries(room_id, member_id, title, base, ingredients, recipe, pitch)
+  VALUES (p_room_id, v_member_id, trim(p_title), trim(p_base), p_ingredients, coalesce(p_recipe, ''), '')
+  RETURNING id INTO v_id;
+
+  RETURN v_id;
+END;
+$function$;
+
+-- 4) Votar en cualquier momento. Se mantiene: 1-5, no votar la propia y un voto por tostada.
+CREATE OR REPLACE FUNCTION public.cast_toast_vote(p_toast_id uuid, p_rating int)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path TO 'public'
+AS $function$
+DECLARE
+  v_room_id uuid;
+  v_owner uuid;
+BEGIN
+  SELECT t.room_id, m.user_id
+  INTO v_room_id, v_owner
+  FROM public.toast_entries AS t
+  JOIN public.toast_room_members AS m ON m.id = t.member_id
+  WHERE t.id = p_toast_id;
+
+  IF v_room_id IS NULL THEN RAISE EXCEPTION 'Tostada no encontrada.'; END IF;
+  IF NOT public.is_toast_room_member(v_room_id) THEN RAISE EXCEPTION 'No perteneces a esta sala.'; END IF;
+  IF v_owner = auth.uid() THEN RAISE EXCEPTION 'No puedes votar tu propia tostada.'; END IF;
+  IF p_rating NOT BETWEEN 1 AND 5 THEN RAISE EXCEPTION 'La valoración debe estar entre 1 y 5.'; END IF;
+
+  INSERT INTO public.toast_votes(room_id, toast_id, voter_id, rating)
+  VALUES (v_room_id, p_toast_id, auth.uid(), p_rating);
+END;
+$function$;
+
+-- Permisos RPC para usuarios autenticados (incluidos los anónimos autenticados).
+GRANT EXECUTE ON FUNCTION public.create_toast_room(text, text) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.join_toast_room(text, text) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.submit_toast_entry(uuid, text, text, text[], text, text) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.cast_toast_vote(uuid, int) TO authenticated;
+
+-- v3: eventos individuales por participante (incluido el creador).
+-- Este bloque también está disponible por separado en supabase_update.sql.
+ALTER TABLE public.toast_room_members ADD COLUMN IF NOT EXISTS challenge text;
+
+CREATE OR REPLACE FUNCTION public.random_toast_challenge()
+RETURNS text LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path TO 'public'
+AS $function$
+DECLARE
+  v_challenges text[] := ARRAY[
+    '🌋 En algún punto de la preparación debes mencionar un volcán y relacionarlo con tu tostada.',
+    '🐉 En la preparación debe aparecer un dragón que tenga una opinión muy firme sobre uno de los ingredientes.',
+    '📺 Describe al menos un paso como si estuvieras vendiendo la tostada en un anuncio de teletienda.',
+    '👽 Uno de los ingredientes debe ser presentado como un misterioso descubrimiento extraterrestre.',
+    '💥 Incluye un efecto de sonido escrito (¡PLOF!, ¡CHOF!, ¡BOING!) dentro de la preparación.',
+    '⚠️ Añade una advertencia absurda sobre los posibles efectos secundarios de comer tu tostada.',
+    '🏴‍☠️ En algún momento, explica un paso de la receta como lo haría un pirata.',
+    '🗡️ Presenta uno de los ingredientes como si fuera un arma legendaria con nombre propio.',
+    '👑 La preparación debe incluir una frase de un rey o una reina que pruebe tu tostada.',
+    '🎵 Incluye una pequeña rima de dos versos dentro de la descripción de la preparación.'
+  ];
+BEGIN
+  RETURN v_challenges[1 + floor(random() * cardinality(v_challenges))::int];
+END;
+$function$;
+UPDATE public.toast_room_members SET challenge=public.random_toast_challenge() WHERE challenge IS NULL;
+
+CREATE OR REPLACE FUNCTION public.create_toast_room(p_room_name text, p_display_name text)
+RETURNS TABLE(room_id uuid, invite_token text)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public','extensions'
+AS $function$
+DECLARE v_room_id uuid; v_token text;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Debes iniciar sesión.'; END IF;
+  IF length(trim(p_display_name)) NOT BETWEEN 1 AND 35 THEN RAISE EXCEPTION 'Nombre no válido.'; END IF;
+  v_token := encode(extensions.gen_random_bytes(24),'hex');
+  INSERT INTO public.toast_rooms(name,invite_hash,director_id,challenge)
+  VALUES(coalesce(nullif(trim(p_room_name),''),'El Gran Maestro Tostadero'),extensions.digest(v_token,'sha256'),auth.uid(),NULL)
+  RETURNING id INTO v_room_id;
+  INSERT INTO public.toast_room_members(room_id,user_id,display_name,role,challenge)
+  VALUES(v_room_id,auth.uid(),trim(p_display_name),'director',public.random_toast_challenge());
+  RETURN QUERY SELECT v_room_id,v_token;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.join_toast_room(p_invite_token text,p_display_name text)
+RETURNS TABLE(room_id uuid)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public'
+AS $function$
+#variable_conflict use_column
+DECLARE v_room_id uuid;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Debes iniciar sesión.'; END IF;
+  IF length(trim(p_display_name)) NOT BETWEEN 1 AND 35 THEN RAISE EXCEPTION 'Nombre no válido.'; END IF;
+  SELECT r.id INTO v_room_id FROM public.toast_rooms AS r
+  WHERE r.invite_hash=extensions.digest(p_invite_token,'sha256') AND r.status<>'finished';
+  IF v_room_id IS NULL THEN RAISE EXCEPTION 'El enlace no es válido o el concurso ha terminado.'; END IF;
+  INSERT INTO public.toast_room_members(room_id,user_id,display_name,role,challenge)
+  VALUES(v_room_id,auth.uid(),trim(p_display_name),'player',public.random_toast_challenge())
+  ON CONFLICT(room_id,user_id) DO UPDATE SET display_name=EXCLUDED.display_name;
+  RETURN QUERY SELECT v_room_id;
+END;
+$function$;
+GRANT EXECUTE ON FUNCTION public.create_toast_room(text,text) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.join_toast_room(text,text) TO authenticated;
+REVOKE ALL ON FUNCTION public.random_toast_challenge() FROM PUBLIC,anon,authenticated;

@@ -13,3 +13,4 @@ label{display:block;color:var(--muted);font-size:12px;font-weight:700;margin:13p
 .score-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.score-fields label{background:#211a16;padding:10px;border:1px solid #60482f}.score-fields input{width:100%;accent-color:var(--gold)}
 .rank-row{display:grid;grid-template-columns:45px 1fr auto;gap:10px;align-items:center;padding:12px 4px;border-bottom:1px solid #60482f}.rank-no{color:var(--gold2);font-weight:700}.rank-score{font-weight:700;color:var(--gold2)}footer{text-align:center;color:var(--muted);font-size:11px;padding:20px}
 @media(max-width:600px){body{padding:10px}.room-head{align-items:flex-start;flex-direction:column}.rank-row{grid-template-columns:30px 1fr auto}.hero{padding-top:12px}}
+.toast-challenge{margin:10px 0 12px;padding:10px 12px;border-style:solid;border-color:#80613b}.toast-challenge p{margin-bottom:0}
