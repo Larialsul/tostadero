@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#211a16">
+  <title>El Gran Maestro Tostadero</title>
+  <link rel="stylesheet" href="./styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="./config.js"></script>
+  <script defer src="./app.js"></script>
+</head>
+<body>
+<main class="shell">
+  <header class="hero">
+    <div class="kicker">Concurso gastronómico de la taberna</div>
+    <h1>🍞 El Gran Maestro Tostadero</h1>
+    <p>Una rebanada, cinco ingredientes y la gloria eterna.</p>
+  </header>
+
+  <section id="setup" class="panel">
+    <h2>Entrar en la cocina</h2>
+    <p class="muted">Crea una sala como director o entra con el enlace que te han enviado.</p>
+    <label>Tu nombre<input id="displayName" maxlength="35" placeholder="Nombre del participante"></label>
+    <div id="landingActions" class="actions">
+      <button id="createRoom" class="primary">Crear concurso</button>
+      <button id="joinRoom" class="secondary hidden">Entrar en esta sala</button>
+    </div>
+    <p id="setupMessage" class="message" aria-live="polite"></p>
+    <div id="inviteBox" class="invite hidden">
+      <strong>¡Sala creada!</strong>
+      <p>Comparte este enlace con los participantes:</p>
+      <input id="inviteLink" readonly>
+      <button id="copyInvite" class="secondary">Copiar enlace</button>
+    </div>
+  </section>
+
+  <section id="room" class="hidden">
+    <div class="room-head panel">
+      <div>
+        <div class="kicker" id="roleLabel">Sala</div>
+        <h2 id="roomTitle">El concurso</h2>
+        <p class="muted">Código: <strong id="roomCode"></strong> · Estado: <strong id="roomStatus"></strong></p>
+      </div>
+      <button id="copyRoomLink" class="secondary">Compartir enlace</button>
+    </div>
+
+    <nav class="tabs">
+      <button class="tab active" data-tab="make">Mi tostada</button>
+      <button class="tab" data-tab="contest">Concurso</button>
+      <button class="tab" data-tab="ranking">Clasificación</button>
+      <button class="tab host-only hidden" data-tab="host">Control del director</button>
+    </nav>
+
+    <section id="make" class="panel tab-panel">
+      <h2>Diseña tu tostada</h2>
+      <p class="muted">Elige una base y hasta cinco ingredientes. Después presenta tu receta al concurso.</p>
+      <form id="toastForm">
+        <label>Nombre de la tostada<input id="toastName" maxlength="50" required placeholder="La Bendición del Dragón"></label>
+        <h3>Base obligatoria</h3>
+        <div class="choices">
+          <label class="choice"><input type="radio" name="base" value="Pan de hogaza" checked> 🍞 Pan de hogaza</label>
+          <label class="choice"><input type="radio" name="base" value="Pan de centeno"> 🌾 Pan de centeno</label>
+          <label class="choice"><input type="radio" name="base" value="Pan de semillas"> 🌻 Pan de semillas</label>
+          <label class="choice"><input type="radio" name="base" value="Brioche"> 🥐 Brioche</label>
+        </div>
+        <h3>Ingredientes <small>(máximo 5)</small></h3>
+        <div id="ingredientList" class="ingredients"></div>
+        <p id="ingredientCount" class="hint">0 / 5 ingredientes</p>
+        <label>Preparación<textarea id="recipe" rows="3" placeholder="Explica cómo prepararías tu tostada..."></textarea></label>
+        <label>Defensa ante el jurado<textarea id="pitch" rows="2" placeholder="¿Por qué merece ganar?"></textarea></label>
+        <div class="challenge">
+          <strong>Reto de la taberna</strong>
+          <p id="challengeText">El director todavía no ha anunciado un reto.</p>
+        </div>
+        <button id="submitToast" class="primary" type="submit">Presentar mi tostada</button>
+        <p id="toastMessage" class="message" aria-live="polite"></p>
+      </form>
+      <div id="myToast" class="my-toast hidden"></div>
+    </section>
+
+    <section id="contest" class="panel tab-panel hidden">
+      <h2>Las creaciones de la taberna</h2>
+      <p class="muted">Descubre las recetas y, cuando se abra la votación, valora las tostadas de los demás.</p>
+      <div id="toastList" class="toast-list"></div>
+    </section>
+
+    <section id="ranking" class="panel tab-panel hidden">
+      <h2>Clasificación en directo</h2>
+      <p class="muted">Puntuación combinada: jurado (hasta 15) + media de votos de participantes (hasta 5).</p>
+      <div id="rankingList"></div>
+    </section>
+
+    <section id="host" class="panel tab-panel hidden">
+      <h2>Control del director</h2>
+      <p class="muted">Gestiona las fases del concurso y anuncia retos para todos.</p>
+      <div class="host-controls">
+        <button id="startSubmissions" class="secondary">Abrir presentación de tostadas</button>
+        <button id="startVoting" class="primary">Abrir votaciones</button>
+        <button id="finishRoom" class="secondary">Finalizar concurso</button>
+      </div>
+      <label>Reto para todos<input id="hostChallenge" maxlength="240" placeholder="Ej. Debéis incluir un ingrediente dulce..."></label>
+      <button id="publishChallenge" class="secondary">Publicar reto</button>
+      <p id="hostMessage" class="message"></p>
+      <h3>Participantes</h3>
+      <div id="memberList"></div>
+      <h3>Puntuar como jurado</h3>
+      <div id="judgeList"></div>
+    </section>
+  </section>
+  <footer>✦ La sabiduría es la mejor de las victorias... pero una buena tostada ayuda. ✦</footer>
+</main>
+</body>
+</html>
